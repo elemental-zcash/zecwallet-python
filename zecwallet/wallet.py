@@ -1,13 +1,16 @@
 from decimal import Decimal
-from json import loads
+from json import loads, JSONDecodeError
 from subprocess import PIPE , Popen
+import re
 
 
 
 class Wallet():
-	def __init__(self , WALLET_EXEC_FULL_PATH , WALLET_DECRYPTION_KEY = ''):
+	def __init__(self , WALLET_EXEC_FULL_PATH , WALLET_DECRYPTION_KEY = '', WALLET_SERVER = "https://mainnet.lightwalletd.com:9067"):
 		self._WALLET_DECRYPTION_KEY = WALLET_DECRYPTION_KEY
-		self._sp = Popen([WALLET_EXEC_FULL_PATH] , stdout = PIPE , stdin = PIPE)
+		wallet_cmd = [WALLET_EXEC_FULL_PATH, "--server", WALLET_SERVER]
+
+		self._sp = Popen(wallet_cmd , stdout = PIPE , stdin = PIPE)
 		self._readOutput()
 
 
@@ -36,7 +39,15 @@ class Wallet():
 		balanceCommand = ('balance')
 		balances = self.communicate(balanceCommand)
 
-		if (targetAddress[0] == 'z'):
+		if (targetAddress[0] == 'u'):
+			for addressInfo in balances['ua_addresses']:
+				if (addressInfo['address'] == targetAddress):
+					if (fullResult):
+						return addressInfo
+					else:
+						return addressInfo['uabalance']
+			raise RuntimeError('The provided address was not found.')
+		elif (targetAddress[0] == 'z'):
 			for addressInfo in balances['z_addresses']:
 				if (addressInfo['address'] == targetAddress):
 					if (fullResult):
@@ -389,6 +400,11 @@ class Wallet():
 	def _fetchResult(self):
 		rawOutput = self._readOutput()
 		loadableOutput = ''
+		error_pattern = r'Error:.+'
+		error_regex = re.compile(error_pattern)
+
+		if error_regex.search(rawOutput):
+			return rawOutput
 
 		jsonStarted = False
 		for line in rawOutput.split('\n'):
@@ -400,14 +416,22 @@ class Wallet():
 					if ((line[0] == '}') or (line[0] == ']')):
 						break
 
-		return loads(loadableOutput , parse_float = Decimal , parse_int = Decimal)
+		return loads(loadableOutput, parse_float=Decimal, parse_int=Decimal)
 
 
 	def _readOutput(self):
+		error_pattern = r'Error:.+'
+		error_regex = re.compile(error_pattern)
+
 		output = ''
 		while (True):
 			outputLine = self._sp.stdout.readline().decode()
 			output += outputLine
+
+			if error_regex.search(outputLine):
+				print("Error message found:", outputLine)
+				return output
+
 			if ((not(outputLine)) or (outputLine[0] == '}') or (outputLine[0] == ']') or (outputLine[0:2] == '[]')):
 				return output
 
